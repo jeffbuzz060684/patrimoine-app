@@ -23,15 +23,6 @@ jobs:
           node-version: 20
       - name: Générer les icônes PNG
         run: node tools/gen-icons.js
-      - name: Activer Pages en mode Actions (idempotent)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          set +e
-          gh api --method POST "/repos/$REPO/pages" -f "build_type=workflow"
-          set -e
-          echo "Pages prêt."
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

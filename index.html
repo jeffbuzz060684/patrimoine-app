@@ -53,6 +53,8 @@ h3.sec{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--
 .pct{color:var(--muted);width:38px;text-align:right}
 .chart{width:100%;height:150px;display:block}
 .note{font-size:11px;color:var(--muted);line-height:1.5;margin:8px 0}
+.ai-input{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--border);border-radius:12px;padding:10px;font-size:13px;margin:8px 0 2px;font-family:inherit}
+.ai-result{font-size:13px;line-height:1.6;white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px;margin:12px 0 4px;max-height:340px;overflow-y:auto}
 .btn-primary{display:block;width:100%;background:var(--sky);color:#041022;border:none;border-radius:12px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;margin:8px 0}
 .btn-line{display:block;width:100%;background:var(--card);color:var(--txt);border:1px solid var(--border);border-radius:12px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;margin:8px 0}
 .btn-del{display:block;width:100%;background:transparent;color:var(--rose);border:1px solid rgba(251,113,133,.4);border-radius:12px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;margin:8px 0}
@@ -321,6 +323,7 @@ function viewResume() {
 
   html += pieCard("Répartition par type", envData);
   html += pieCard("Répartition par catégorie", catData);
+  html += aiCard();
   if (state.snapshots.length >= 2) {
     html += '<div class="card"><h3 class="sec" style="margin:0 0 10px">Évolution du patrimoine</h3>' +
       lineSVG(state.snapshots, "#38bdf8") + xLabels(state.snapshots) + "</div>";
@@ -988,6 +991,8 @@ document.getElementById("app").addEventListener("click", function(e) {
   else if (act === "import-data") importData();
   else if (act === "export-csv") exportCSV();
   else if (act === "import-csv") importCSV();
+  else if (act === "ai-analyze") aiAnalyze();
+  else if (act === "ai-clear") aiClear();
 });
 modalRoot.addEventListener("click", function(e) {
   if (e.target.hasAttribute && e.target.hasAttribute("data-overlay")) { closeModal(); return; }
@@ -1011,6 +1016,90 @@ modalRoot.addEventListener("click", function(e) {
     else { el.classList.add("confirm"); el.textContent = "Confirmer la suppression ?"; }
   }
 });
+
+// ---------- Analyse IA (Mistral) ----------
+var AI_KEY_STORE = "suivi-patrimoine-mistral-key";
+var AI_RESULT_STORE = "suivi-patrimoine-ai-result";
+function mistralKey() { try { return localStorage.getItem(AI_KEY_STORE) || ""; } catch (e) { return ""; } }
+function aiResult() { try { return JSON.parse(localStorage.getItem(AI_RESULT_STORE) || "null"); } catch (e) { return null; } }
+function buildAISummary() {
+  var total = state.envelopes.reduce(function(s,e){ return s + envValue(e); }, 0);
+  var invested = state.envelopes.reduce(function(s,e){ return s + envInvested(e); }, 0);
+  return {
+    devise: "EUR",
+    valeurTotale: Math.round(total),
+    totalInvesti: Math.round(invested),
+    gain: Math.round(total - invested),
+    performancePct: invested > 0 ? Math.round(((total - invested) / invested) * 1000) / 10 : null,
+    enveloppes: state.envelopes.map(function(e) {
+      return {
+        enveloppe: e.name,
+        type: e.type,
+        valeur: Math.round(envValue(e)),
+        investi: Math.round(envInvested(e)),
+        actifs: e.assets.map(function(a) {
+          return { nom: a.name, categorie: a.category, quantite: a.quantity, prixAchat: a.buyPrice, prixCourant: a.currentPrice, valeur: Math.round(assetValue(a) * 100) / 100 };
+        })
+      };
+    }),
+    historique: state.snapshots.slice(-12)
+  };
+}
+function aiCard() {
+  var res = aiResult();
+  var html = '<div class="card"><h3 class="sec" style="margin:0 0 6px">🤖 Analyse IA (Mistral)</h3>' +
+    '<div class="note">Tes données restent sur ton appareil. Seule une synthèse est envoyée à l\u2019API Mistral quand tu cliques sur « Analyser ». Ta clé est stockée uniquement dans ce navigateur.</div>' +
+    '<input id="ai-key" type="password" class="ai-input" placeholder="Clé API Mistral (console.mistral.ai)" value="' + esc(mistralKey()) + '">' +
+    '<button class="btn-primary" data-action="ai-analyze">Analyser mon patrimoine</button>';
+  if (res) {
+    html += '<div class="ai-result">' + esc(res.text) + '</div>' +
+      '<div class="note">Analyse du ' + esc(res.date) + ' — analyse éducative générale, pas un conseil financier personnalisé.</div>' +
+      '<button class="btn-line" data-action="ai-clear">↺ Effacer l\u2019analyse</button>';
+  }
+  html += '</div>';
+  return html;
+}
+function aiAnalyze() {
+  var el = document.getElementById("ai-key");
+  var key = el ? el.value.trim() : "";
+  if (!key) { alert("Renseigne ta clé API Mistral (console.mistral.ai → API keys)."); return; }
+  if (state.envelopes.length === 0) { alert("Ajoute d\u2019abord au moins une enveloppe avec un actif."); return; }
+  try { localStorage.setItem(AI_KEY_STORE, key); } catch (e) {}
+  var btn = document.querySelector('[data-action="ai-analyze"]');
+  if (btn) { btn.disabled = true; btn.textContent = "Analyse en cours…"; }
+  var sys = "Tu es un analyste patrimonial senior avec 30 ans d'expérience en gestion de patrimoine. Analyse la synthèse JSON fournie et réponds en français. Structure ta réponse avec ces sections : 1) Lecture d'ensemble, 2) Points forts, 3) Risques principaux, 4) Axes d'amélioration prioritaires (allocation, épargne de précaution, diversification), 5) Questions à poser à un conseiller financier indépendant. Appuie-toi sur les montants et pourcentages du JSON. Ne recommande aucun produit financier nommé, ne promets aucun rendement. Termine par : \"Ceci est une analyse éducative générale, pas un conseil financier personnalisé.\"";
+  var body = JSON.stringify({
+    model: "mistral-small-latest",
+    temperature: 0.3,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: "Voici la synthèse de mon patrimoine (JSON) :\n" + JSON.stringify(buildAISummary()) + "\n\nFournis ton analyse structurée." }
+    ]
+  });
+  fetch("https://api.mistral.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+    body: body
+  }).then(function(res) {
+    return res.json().then(function(data) {
+      if (!res.ok) throw new Error((data && data.message) || ("Erreur HTTP " + res.status));
+      return data;
+    });
+  }).then(function(data) {
+    var msg = data.choices && data.choices[0] && data.choices[0].message;
+    var text = msg && typeof msg.content === "string" ? msg.content : "";
+    if (!text) throw new Error("Réponse vide de l\u2019API.");
+    try { localStorage.setItem(AI_RESULT_STORE, JSON.stringify({ text: text, date: new Date().toISOString().slice(0, 10) })); } catch (e) {}
+    render();
+  }).catch(function(err) {
+    alert("Analyse impossible : " + err.message);
+    render();
+  });
+}
+function aiClear() {
+  try { localStorage.removeItem(AI_RESULT_STORE); } catch (e) {}
+  render();
+}
 
 // ---------- Démarrage ----------
 try {

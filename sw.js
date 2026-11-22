@@ -1,4 +1,4 @@
-var CACHE = "patrimoine-v11";
+var CACHE = "patrimoine-v12";
 var SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", function(e) {
